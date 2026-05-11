@@ -117,8 +117,6 @@
   import {
     enableSimulation,
     externalResourceNames,
-    externalResources,
-    fetchingResourcesExternal,
     initialSpansLoading,
     resetSimulationStores,
     resourceTypes,
@@ -201,7 +199,6 @@
   let selectedSimulationStatus: Status | null;
   let windowWidth = 1600;
   let simulationDataAbortController: AbortController;
-  let resourcesExternalAbortController: AbortController;
   let schedulingStatusText: string = '';
   let lastSimulationDatasetId: number | null = null;
   let consolePaneApi: PaneAPI;
@@ -391,35 +388,17 @@
     initializeView({ ...data.initialView });
   }
 
-  $: if ($initialPlan && $planDatasets) {
-    const datasetNames = [];
-
+  // External profile names. The actual profile data is fetched on demand
+  // per visible row by createExternalResourceSubscription (see
+  // stores/externalResource.ts), driven off the same planDatasets sub.
+  $: if ($planDatasets) {
+    const names = new Set<string>();
     for (const dataset of $planDatasets) {
       for (const profile of dataset.dataset.profiles) {
-        datasetNames.push(profile.name);
+        names.add(profile.name);
       }
     }
-
-    $externalResourceNames = [...new Set(datasetNames)];
-
-    resourcesExternalAbortController?.abort();
-    resourcesExternalAbortController = new AbortController();
-    $fetchingResourcesExternal = true;
-    $externalResources = [];
-    effects
-      .getResourcesExternal(
-        $initialPlan.id,
-        $simulationDatasetId > -1 ? $simulationDatasetId : null,
-        $initialPlan.start_time,
-        get(user),
-        resourcesExternalAbortController.signal,
-      )
-      .then(({ aborted, resources }) => {
-        if (!aborted) {
-          $externalResources = resources;
-          $fetchingResourcesExternal = false;
-        }
-      });
+    $externalResourceNames = [...names];
   }
 
   $: if ($planId > -1) {
@@ -450,6 +429,9 @@
     simulationDataAbortController?.abort();
     $spans = null;
     $simulationEvents = null;
+    // Only the Complete branch fetches spans; clear the flag in every other
+    // branch so the global indicator doesn't spin forever on failed/no-sim.
+    $initialSpansLoading = false;
   }
 
   $: compactNavMode = windowWidth < 1200;
@@ -490,8 +472,8 @@
   $: if (typeof $planModelId === 'number' && browser) {
     // Asynchronously fetch resource types
     $resourceTypesLoading = true;
-    effects.getResourceTypes($planModelId, get(user)).then(initialResourceTypes => {
-      $resourceTypes = initialResourceTypes;
+    effects.getResourceTypes($planModelId, get(user)).then(modelResourceTypes => {
+      $resourceTypes = modelResourceTypes;
       $resourceTypesLoading = false;
     });
   }

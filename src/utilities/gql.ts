@@ -1392,6 +1392,28 @@ const gql = {
     }
   `,
 
+  // Windowed pull for an external profile's segments — counterpart to
+  // GET_PROFILE_SINCE for sim profiles. Keyed on (datasetId, profileId)
+  // because external names can collide across plan_dataset rows (e.g. one
+  // tied to a sim, one plan-level); planDatasets metadata is responsible
+  // for picking which row, then this query fetches that row's deltas.
+  GET_EXTERNAL_PROFILE_SEGMENTS_SINCE: `#graphql
+    query GetExternalProfileSegmentsSince($datasetId: Int!, $profileId: Int!, $sinceOffset: interval!) {
+      ${Queries.PROFILES}(where: { _and: { dataset_id: { _eq: $datasetId }, id: { _eq: $profileId } } }, limit: 1) {
+        profile_segments(
+          where: { _and: { dataset_id: { _eq: $datasetId }, start_offset: { _gt: $sinceOffset } } }
+          order_by: { start_offset: asc }
+        ) {
+          dataset_id
+          dynamics
+          is_gap
+          profile_id
+          start_offset
+        }
+      }
+    }
+  `,
+
   GET_MODELS: `#graphql
     query GetModels {
       models: ${Queries.MISSION_MODELS} {
@@ -1684,14 +1706,20 @@ const gql = {
     }
   `,
 
-  GET_PROFILE: `#graphql
-    query GetProfile($datasetId: Int!, $name: String!) {
+  // Windowed pull: returns the profile header + only the segments past
+  // sinceOffset. Pass "-00:00:01" on the first call to get everything; pass
+  // the last seen start_offset on subsequent calls to get only the delta.
+  GET_PROFILE_SINCE: `#graphql
+    query GetProfileSince($datasetId: Int!, $name: String!, $sinceOffset: interval!) {
       ${Queries.PROFILES}(where: { _and: { dataset_id: { _eq: $datasetId }, name: { _eq: $name } } }, limit: 1) {
         dataset_id
         duration
         id
         name
-        profile_segments(where: { dataset_id: { _eq: $datasetId } }, order_by: { start_offset: asc }) {
+        profile_segments(
+          where: { _and: { dataset_id: { _eq: $datasetId }, start_offset: { _gt: $sinceOffset } } }
+          order_by: { start_offset: asc }
+        ) {
           dataset_id
           dynamics
           is_gap
@@ -1699,31 +1727,6 @@ const gql = {
           start_offset
         }
         type
-      }
-    }
-  `,
-
-  GET_PROFILES_EXTERNAL: `#graphql
-    query GetProfilesExternal($planId: Int!, $simulationDatasetFilter: [plan_dataset_bool_exp!]) {
-      ${Queries.PLAN_DATASETS}(where: { plan_id: { _eq: $planId }, _or: $simulationDatasetFilter }) {
-        dataset {
-          profiles {
-            dataset_id
-            duration
-            id
-            name
-            profile_segments(order_by: { start_offset: asc }) {
-              dataset_id
-              dynamics
-              is_gap
-              profile_id
-              start_offset
-            }
-            type
-          }
-        }
-        dataset_id
-        offset_from_plan_start
       }
     }
   `,
@@ -2896,6 +2899,7 @@ const gql = {
     subscription SubPlanDatasets($planId: Int!) {
       ${Queries.PLAN_DATASETS}(where: {plan_id: {_eq: $planId}}) {
         dataset_id
+        offset_from_plan_start
         simulation_dataset_id
         dataset {
           profiles {
@@ -3193,38 +3197,6 @@ const gql = {
             name
           }
         }
-      }
-    }
-  `,
-
-  SUB_PROFILE_HEADER: `#graphql
-    subscription SubProfileHeader($datasetId: Int!, $name: String!) {
-      ${Queries.PROFILES}(where: { _and: { dataset_id: { _eq: $datasetId }, name: { _eq: $name } } }, limit: 1) {
-        dataset_id
-        duration
-        id
-        name
-        type
-      }
-    }
-  `,
-
-  // Hasura streaming subscription. The cursor advances strictly past the last seen
-  // start_offset, so $startOffset must be < the smallest start_offset we want to
-  // receive — pass a negative Postgres interval (e.g. "-00:00:01") to capture a
-  // segment at offset 0. ISO 8601 ("-PT1S") is rejected by Hasura's interval scalar.
-  SUB_PROFILE_SEGMENTS_STREAM: `#graphql
-    subscription SubProfileSegmentsStream($datasetId: Int!, $profileId: Int!, $startOffset: interval!) {
-      ${Queries.PROFILE_SEGMENT_STREAM}(
-        cursor: { initial_value: { start_offset: $startOffset }, ordering: ASC },
-        batch_size: 2000,
-        where: { _and: { dataset_id: { _eq: $datasetId }, profile_id: { _eq: $profileId } } }
-      ) {
-        dataset_id
-        dynamics
-        is_gap
-        profile_id
-        start_offset
       }
     }
   `,
