@@ -102,6 +102,7 @@ export async function showConfirmExpansionModal(
   allConstraintsThatAreCheckedPass: boolean,
   constraintPlanSpecsInPlan: ConstraintPlanSpecification[],
   constraintToConstraintResponseMap: ConstraintInvocationMap<ConstraintResponse>,
+  simulationDatasetId: number,
 ): Promise<ModalElementValue> {
   return new Promise(resolve => {
     if (browser) {
@@ -114,6 +115,7 @@ export async function showConfirmExpansionModal(
             allConstraintsThatAreCheckedPass,
             constraintPlanSpecsInPlan,
             constraintToConstraintResponseMap,
+            simulationDatasetId,
             simulationOutOfDate,
           },
           target,
