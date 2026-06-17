@@ -735,7 +735,7 @@
         directive.name,
         directive.metadata,
         $plan,
-        $user
+        $user,
       );
       if (newDirectiveId !== null) {
         $directiveBuilderIsVisible = false;
