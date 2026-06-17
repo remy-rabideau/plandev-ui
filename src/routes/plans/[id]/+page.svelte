@@ -106,6 +106,7 @@
     planSnapshotId,
     resetPlanSnapshotStores,
   } from '../../../stores/planSnapshots';
+  import { plugins } from '../../../stores/plugins';
   import {
     enableScheduling,
     latestSchedulingRequest,
@@ -165,7 +166,7 @@
   } from '../../../utilities/simulation';
   import { getHumanReadableStatus, statusColors } from '../../../utilities/status';
   import { pluralize } from '../../../utilities/text';
-  import { getUnixEpochTime } from '../../../utilities/time';
+  import { formatDate, getUnixEpochTime, getUnixEpochTimeFromInterval } from '../../../utilities/time';
   import { showSuccessToast } from '../../../utilities/toast';
   import { tooltip } from '../../../utilities/tooltip';
   import { getSearchParameterNumber, removeQueryParam, setQueryParam } from '../../../utilities/url';
@@ -724,8 +725,18 @@
 
   function onCreateActivityDirective(directive: ActivityDirectiveInsertInput) {
     if ($plan !== null && $plan.model) {
-      console.log(directive);
-      effects.createActivityDirectivePredefined(directive, $plan, $user);
+      // Convert offset to absolute start with plan as anchor
+      const offsetAsMs = getUnixEpochTimeFromInterval($plan.start_time, directive.start_offset);
+      const formattedStart = formatDate(new Date(offsetAsMs), $plugins.time.primary.format);
+      effects.createActivityDirective(
+        directive.arguments,
+        formattedStart,
+        directive.type,
+        directive.name,
+        directive.metadata,
+        $plan,
+        $user
+      );
       $directiveBuilderIsVisible = false;
     }
   }
