@@ -757,8 +757,8 @@
       $activeDirectiveName = '';
     }
   }}
-  on:createActivityDirective={directive => {
-    onCreateActivityDirective(directive.detail.directive);
+  on:createActivityDirective={event => {
+    onCreateActivityDirective(event.detail.directive);
   }}
   user={$user}
 />
