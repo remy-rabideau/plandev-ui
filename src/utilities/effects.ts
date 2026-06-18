@@ -149,6 +149,7 @@ import type {
   ConstraintEffectiveArguments,
   DefaultEffectiveArguments,
   EffectiveArguments,
+  ErrorMap,
   ParametersMap,
   ParameterValidationResponse,
   SchedulingGoalEffectiveArguments,
@@ -8894,7 +8895,7 @@ const effects = {
     modelId: number,
     argumentsMap: ArgumentsMap,
     user: User | null,
-  ): Promise<Record<string, string[]>> {
+  ): Promise<ErrorMap> {
     try {
       const data = await reqHasura<ParameterValidationResponse>(
         gql.VALIDATE_ACTIVITY_ARGUMENTS,
