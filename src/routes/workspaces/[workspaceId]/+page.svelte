@@ -109,7 +109,7 @@
   import { ErrorTypes } from '../../../utilities/errors';
   import { downloadBlob, filterEmpty } from '../../../utilities/generic';
   import { isSaveEvent } from '../../../utilities/keyboardEvents';
-  import { showConfirmModal, showRunActionResultsModal } from '../../../utilities/modal';
+  import { showConfirmModal, showRunActionResultsModal, showUnsavedChangesModal } from '../../../utilities/modal';
   import { featurePermissions } from '../../../utilities/permissions';
   import { getWorkspacesUrl } from '../../../utilities/routes';
   import * as adaptationUtils from '../../../utilities/sequence-editor/adaptation-utils';
@@ -388,18 +388,23 @@
     }
     // Cancel navigation first, then show async modal and navigate if confirmed
     cancel();
-    showConfirmModal(
-      'Leave Page',
-      'There are unsaved changes. Are you sure you want to leave this page?',
-      'Leave Page',
-      true,
+    showUnsavedChangesModal(
+      'There are unsaved changes. What would you like to do before leaving this page?',
+      'Unsaved Changes',
+      'Save and Leave',
+      'Discard and Leave',
       'Stay on Page',
-    ).then(({ confirm }) => {
-      if (confirm && to?.url) {
-        // Reset content to allow navigation without re-triggering the modal
-        activeDocument.markClean();
-        goto(to.url);
+    ).then(async ({ confirm, value }) => {
+      if (!confirm || !to?.url) {
+        return;
       }
+      if (value?.shouldSave && !(await saveActiveDocument())) {
+        // Save failed or was cancelled — stay on the page so edits aren't lost.
+        return;
+      }
+      // Reset content to allow navigation without re-triggering the modal
+      activeDocument.markClean();
+      goto(to.url);
     });
   });
 
@@ -660,17 +665,53 @@
     setSequenceLanguages(undefined);
   }
 
+  /**
+   * Saves the active document, handling both existing files and brand-new drafts (which
+   * have no path yet and are routed through the new-sequence flow, prompting for a name).
+   * Returns true only if the save actually persisted; marks the document clean on success.
+   */
+  async function saveActiveDocument(): Promise<boolean> {
+    const content = $activeDocument.currentContent;
+    if ($activeDocumentPath) {
+      const saved = await effects.saveWorkspaceFile($workspaceId, $activeDocumentPath, content, $user);
+      if (saved) {
+        activeDocument.markClean(content);
+      }
+      return saved;
+    }
+    if ($workspace && workspaceTree && content) {
+      const newFilePath = await effects.newWorkspaceSequence($workspace, workspaceTree, '', content, $user);
+      if (newFilePath !== null) {
+        const { filename } = separateFilenameFromPath(newFilePath);
+        // Re-associate the buffer with the newly created file. Without this the document
+        // keeps its null path, so returning to the editor shows the content as a path-less
+        // "blank" draft instead of the saved file. (The URL is kept in sync separately by
+        // the caller — updateContentModeUrl on File mode, or confirmAndNavigate's replaceState.)
+        activeDocument.updatePath(newFilePath, filename ?? undefined, WorkspaceContentType.Sequence);
+        activeDocument.markClean(content);
+        refreshWorkspaceContents();
+        return true;
+      }
+    }
+    return false;
+  }
+
   async function confirmAndNavigate(filePath: string | null) {
     if ($activeDocumentIsDirty) {
-      const { confirm } = await showConfirmModal(
-        'Navigate Away',
-        `There are unsaved changes. Are you sure you want navigate away from the current file?`,
-        'Navigate Away',
-        true,
+      const { confirm, value } = await showUnsavedChangesModal(
+        'There are unsaved changes. What would you like to do before navigating away from the current file?',
+        'Unsaved Changes',
+        'Save and Navigate',
+        'Discard and Navigate',
         'Keep Editing',
       );
 
       if (!confirm) {
+        return false;
+      }
+
+      if (value?.shouldSave && !(await saveActiveDocument())) {
+        // Save failed or was cancelled — stay on the current file so edits aren't lost.
         return false;
       }
     }
@@ -716,8 +757,17 @@
       return false;
     }
 
-    // Save the file before the operation
-    await effects.saveWorkspaceFile($workspaceId, $activeDocumentPath!, $activeDocument.currentContent, $user);
+    // Save the file before the operation; abort if the save failed so we don't proceed
+    // against stale server content or clear the dirty flag on unsaved edits.
+    const saved = await effects.saveWorkspaceFile(
+      $workspaceId,
+      $activeDocumentPath!,
+      $activeDocument.currentContent,
+      $user,
+    );
+    if (!saved) {
+      return false;
+    }
     activeDocument.markClean($activeDocument.currentContent);
     return true;
   }
@@ -1018,19 +1068,26 @@
   ) {
     // Guard against switching away from dirty file
     if ($workspaceContentMode === WorkspaceContentMode.File && $activeDocumentIsDirty) {
-      const { confirm } = await showConfirmModal(
-        'Navigate Away',
-        'There are unsaved changes. Are you sure you want to navigate away from the current file?',
-        'Navigate Away',
-        true,
+      const { confirm, value } = await showUnsavedChangesModal(
+        'There are unsaved changes. What would you like to do before navigating away from the current file?',
+        'Unsaved Changes',
+        'Save and Navigate',
+        'Discard and Navigate',
         'Keep Editing',
       );
       if (!confirm) {
         return;
       }
-      // Revert content to last-saved state and mark clean
-      activeDocument.updateContent($activeDocument.originalContent);
-      activeDocument.markClean();
+      if (value?.shouldSave) {
+        if (!(await saveActiveDocument())) {
+          // Save failed or was cancelled — stay on the current file so edits aren't lost.
+          return;
+        }
+      } else {
+        // Discard: revert content to last-saved state and mark clean
+        activeDocument.updateContent($activeDocument.originalContent);
+        activeDocument.markClean();
+      }
     }
 
     // Silently reset dirty action detail state on navigate away
@@ -1063,6 +1120,13 @@
     mode: WorkspaceContentMode,
     options?: { actionId?: number | null; runId?: number | null },
   ) {
+    // File mode: keep the active file in the URL so deep links and reloads restore the
+    // open file, rather than dropping it back to the bare workspace route.
+    if (mode === WorkspaceContentMode.File) {
+      replaceState(getWorkspacesUrl(base, $workspaceId, $activeDocumentPath), {});
+      return;
+    }
+
     const baseUrl = getWorkspacesUrl(base, $workspaceId);
     const params = new URLSearchParams();
 

@@ -7188,15 +7188,22 @@ const effects = {
     }
   },
 
-  async saveWorkspaceFile(workspaceId: number, filePath: string, fileContent: string, user: User | null = null) {
+  async saveWorkspaceFile(
+    workspaceId: number,
+    filePath: string,
+    fileContent: string,
+    user: User | null = null,
+  ): Promise<boolean> {
     try {
       await WorkspaceApi.saveFile(workspaceId, filePath, fileContent, true, user);
 
       showSuccessToast('Workspace File Saved Successfully');
       logMessage(`Saved workspace file "${filePath}".`);
+      return true;
     } catch (e) {
       catchError('Workspace file was unable to be saved', e as Error);
       showFailureToast('Workspace File Save Failed');
+      return false;
     }
   },
 
