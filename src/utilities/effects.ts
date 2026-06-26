@@ -8934,7 +8934,7 @@ const effects = {
         throw Error('Unable to validate activity arguments');
       }
     } catch (e) {
-      return { [(e as Error).name]: [(e as Error).message] };
+      return {};
     }
   },
 
